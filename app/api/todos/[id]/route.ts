@@ -22,6 +22,7 @@ if (!global.todos) {
 
 // GET /api/todos/[id] - Get a specific todo
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  console.log('Log from GET')
   const id = Number.parseInt(params.id)
 
   if (isNaN(id)) {
