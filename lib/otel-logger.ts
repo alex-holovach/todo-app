@@ -227,10 +227,5 @@ function flushLogsSync(): void {
     }
 }
 
-// Initialize patching on server side only
-if (typeof window === 'undefined') {
-    patchConsole();
-}
-
 // Export only flushLogs for middleware use - no need for manual calls elsewhere
 export { flushLogs, patchConsole }; 
