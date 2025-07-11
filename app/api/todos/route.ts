@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { flushLogs } from "@/lib/otel-logger"
 
 interface Todo {
   id: number
@@ -15,7 +14,6 @@ let nextId = 1
 // GET /api/todos - Get all todos
 export async function GET() {
   console.log('API: Getting todos, count:', todos.length)
-  await flushLogs()
   return NextResponse.json(todos)
 }
 
@@ -38,7 +36,6 @@ export async function POST(request: NextRequest) {
 
     todos.push(newTodo)
 
-    await flushLogs()
     return NextResponse.json(newTodo, { status: 201 })
   } catch (error) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })

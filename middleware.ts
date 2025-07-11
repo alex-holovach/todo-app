@@ -6,7 +6,8 @@ export async function middleware(request: NextRequest) {
     // Process the request
     const response = NextResponse.next();
 
-    // Flush logs before returning response
+    // Flush buffered logs after each request (only place manual flush is needed)
+    // All console.log/error/warn/info calls are automatically captured and buffered
     await flushLogs();
 
     return response;

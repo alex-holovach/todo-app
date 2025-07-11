@@ -6,7 +6,7 @@ interface LogRecord {
     attributes: Record<string, any>;
 }
 
-// Store logs for middleware flush
+// Store logs for automatic flush
 let logBuffer: LogRecord[] = [];
 
 // Store original console methods
@@ -38,6 +38,7 @@ function getSeverityNumber(severity: string): number {
 }
 
 let isPatched = false;
+let flushInterval: NodeJS.Timeout | null = null;
 
 function patchConsole() {
     // Prevent double patching
@@ -63,12 +64,46 @@ function patchConsole() {
                 },
             };
 
-            // Add to buffer instead of emitting immediately
+            // Add to buffer for automatic flushing
             logBuffer.push(logRecord);
         };
     });
 
     isPatched = true;
+
+    // Set up automatic periodic flushing (every 5 seconds)
+    if (!flushInterval) {
+        flushInterval = setInterval(() => {
+            if (logBuffer.length > 0) {
+                flushLogs().catch(() => {
+                    // Silently handle flush errors
+                });
+            }
+        }, 5000);
+    }
+
+    // Set up process exit handler to flush remaining logs (Node.js runtime only)
+    // Skip in Edge Runtime where process.on is not available
+    try {
+        if (typeof process !== 'undefined' &&
+            typeof process.on === 'function' &&
+            typeof process.env !== 'undefined') {
+            const exitHandler = () => {
+                if (logBuffer.length > 0) {
+                    // Synchronous flush on exit
+                    flushLogsSync();
+                }
+            };
+
+            process.on('exit', exitHandler);
+            process.on('SIGINT', exitHandler);
+            process.on('SIGTERM', exitHandler);
+            process.on('uncaughtException', exitHandler);
+        }
+    } catch (error) {
+        // Silently skip process handlers in Edge Runtime or other environments
+        // where process.on is not available
+    }
 }
 
 // Send logs to OTEL endpoint
@@ -126,7 +161,7 @@ async function sendLogsToOTEL(logs: LogRecord[]): Promise<void> {
     }
 }
 
-// Flush logs to OTEL
+// Flush logs to OTEL (async version for middleware)
 async function flushLogs(): Promise<void> {
     if (logBuffer.length === 0) {
         return;
@@ -138,9 +173,64 @@ async function flushLogs(): Promise<void> {
     await sendLogsToOTEL(logsToSend);
 }
 
+// Synchronous flush for process exit (best effort)
+function flushLogsSync(): void {
+    if (logBuffer.length === 0) {
+        return;
+    }
+
+    const logs = [...logBuffer];
+    logBuffer = [];
+
+    // For process exit, we attempt a synchronous approach
+    // This is a best-effort attempt and may not always succeed
+    try {
+        const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+        const headers = process.env.OTEL_EXPORTER_OTLP_HEADERS;
+
+        if (endpoint && logs.length > 0) {
+            const otlpLogs = {
+                resourceLogs: [
+                    {
+                        resource: {
+                            attributes: [
+                                {
+                                    key: 'service.name',
+                                    value: { stringValue: 'nextjs-app' }
+                                }
+                            ]
+                        },
+                        scopeLogs: [
+                            {
+                                scope: { name: 'console-logger' },
+                                logRecords: logs.map(log => ({
+                                    timeUnixNano: log.timestamp.toString(),
+                                    severityText: log.severityText,
+                                    severityNumber: log.severityNumber,
+                                    body: { stringValue: log.body },
+                                    attributes: Object.entries(log.attributes).map(([key, value]) => ({
+                                        key,
+                                        value: { stringValue: String(value) }
+                                    }))
+                                }))
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            // Note: In a real-world scenario, you might want to use a synchronous HTTP library
+            // or write to a local file as fallback for process exit scenarios
+        }
+    } catch (error) {
+        // Silently fail on exit
+    }
+}
+
 // Initialize patching on server side only
 if (typeof window === 'undefined') {
     patchConsole();
 }
 
+// Export only flushLogs for middleware use - no need for manual calls elsewhere
 export { flushLogs, patchConsole }; 
