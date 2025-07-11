@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { flushLogs } from "@/lib/otel-logger"
 
 interface Todo {
   id: number
@@ -13,6 +14,8 @@ let nextId = 1
 
 // GET /api/todos - Get all todos
 export async function GET() {
+  console.log('API: Getting todos, count:', todos.length)
+  await flushLogs()
   return NextResponse.json(todos)
 }
 
@@ -20,6 +23,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const { text } = await request.json()
+    console.log('API: Creating todo with text:', text)
 
     if (!text || typeof text !== "string" || text.trim().length === 0) {
       return NextResponse.json({ error: "Text is required and must be a non-empty string" }, { status: 400 })
@@ -34,6 +38,7 @@ export async function POST(request: NextRequest) {
 
     todos.push(newTodo)
 
+    await flushLogs()
     return NextResponse.json(newTodo, { status: 201 })
   } catch (error) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })

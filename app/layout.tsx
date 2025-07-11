@@ -1,5 +1,11 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { patchConsole } from '../lib/otel-logger'
+
+// Ensure console patching is applied on server start
+if (typeof window === 'undefined') {
+  patchConsole();
+}
 
 export const metadata: Metadata = {
   title: 'v0 App',
