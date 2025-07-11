@@ -40,7 +40,7 @@ function getSeverityNumber(severity: string): number {
 let isPatched = false;
 let flushInterval: NodeJS.Timeout | null = null;
 
-function patchConsole() {
+export function patchConsole(): void {
     // Prevent double patching
     if (isPatched) return;
 
@@ -162,7 +162,7 @@ async function sendLogsToOTEL(logs: LogRecord[]): Promise<void> {
 }
 
 // Flush logs to OTEL (async version for middleware)
-async function flushLogs(): Promise<void> {
+export async function flushLogs(): Promise<void> {
     if (logBuffer.length === 0) {
         return;
     }
@@ -225,7 +225,4 @@ function flushLogsSync(): void {
     } catch (error) {
         // Silently fail on exit
     }
-}
-
-// Export only flushLogs for middleware use - no need for manual calls elsewhere
-export { flushLogs, patchConsole }; 
+} 

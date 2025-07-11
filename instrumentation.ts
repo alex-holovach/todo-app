@@ -1,11 +1,10 @@
-import { registerOTel } from '@vercel/otel';
-import { patchConsole } from './lib/otel-logger';
+import { registerTelemetry } from 'telemetry-nextjs';
 
 export function register() {
-    registerOTel({
-        serviceName: 'next-app',
+    registerTelemetry({
+        config: {
+            serviceName: 'next-app',
+        },
+        enableConsolePatching: true
     });
-
-    // Patch console early to capture server component logs
-    patchConsole();
 }
