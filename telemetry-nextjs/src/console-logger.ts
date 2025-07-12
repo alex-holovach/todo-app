@@ -1,3 +1,5 @@
+import * as protobuf from 'protobufjs';
+
 interface LogRecord {
     timestamp: number;
     severityText: string;
@@ -35,6 +37,55 @@ function getSeverityNumber(severity: string): number {
         case 'DEBUG': return 5;
         default: return 9;
     }
+}
+
+// Create protobuf schema for OpenTelemetry logs
+function createProtobufSchema(): protobuf.Type {
+    const root = new protobuf.Root();
+
+    // Define the protobuf schema
+    const AnyValue = new protobuf.Type('AnyValue').add(
+        new protobuf.Field('stringValue', 1, 'string', 'optional')
+    );
+
+    const KeyValue = new protobuf.Type('KeyValue')
+        .add(new protobuf.Field('key', 1, 'string'))
+        .add(new protobuf.Field('value', 2, 'AnyValue'));
+
+    const LogRecord = new protobuf.Type('LogRecord')
+        .add(new protobuf.Field('timeUnixNano', 1, 'uint64'))
+        .add(new protobuf.Field('severityText', 2, 'string'))
+        .add(new protobuf.Field('severityNumber', 3, 'int32'))
+        .add(new protobuf.Field('body', 4, 'AnyValue'))
+        .add(new protobuf.Field('attributes', 5, 'KeyValue', 'repeated'));
+
+    const InstrumentationScope = new protobuf.Type('InstrumentationScope')
+        .add(new protobuf.Field('name', 1, 'string'));
+
+    const ScopeLogs = new protobuf.Type('ScopeLogs')
+        .add(new protobuf.Field('scope', 1, 'InstrumentationScope'))
+        .add(new protobuf.Field('logRecords', 2, 'LogRecord', 'repeated'));
+
+    const Resource = new protobuf.Type('Resource')
+        .add(new protobuf.Field('attributes', 1, 'KeyValue', 'repeated'));
+
+    const ResourceLogs = new protobuf.Type('ResourceLogs')
+        .add(new protobuf.Field('resource', 1, 'Resource'))
+        .add(new protobuf.Field('scopeLogs', 2, 'ScopeLogs', 'repeated'));
+
+    const LogsData = new protobuf.Type('LogsData')
+        .add(new protobuf.Field('resourceLogs', 1, 'ResourceLogs', 'repeated'));
+
+    root.add(AnyValue);
+    root.add(KeyValue);
+    root.add(LogRecord);
+    root.add(InstrumentationScope);
+    root.add(ScopeLogs);
+    root.add(Resource);
+    root.add(ResourceLogs);
+    root.add(LogsData);
+
+    return LogsData;
 }
 
 let isPatched = false;
@@ -106,7 +157,7 @@ export function patchConsole(): void {
     }
 }
 
-// Send logs to OTEL endpoint
+// Send logs to OTEL endpoint in protobuf format
 async function sendLogsToOTEL(logs: LogRecord[]): Promise<void> {
     if (logs.length === 0) return;
 
@@ -118,6 +169,8 @@ async function sendLogsToOTEL(logs: LogRecord[]): Promise<void> {
     }
 
     try {
+        const LogsData = createProtobufSchema();
+
         const otlpLogs = {
             resourceLogs: [
                 {
@@ -148,13 +201,17 @@ async function sendLogsToOTEL(logs: LogRecord[]): Promise<void> {
             ]
         };
 
+        // Encode to protobuf
+        const buffer = LogsData.encode(otlpLogs).finish();
+
         const response = await fetch(`${endpoint}/v1/logs`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                ...(headers ? { 'X-Kubiks-Key': headers.split('=')[1] || '' } : {}),
+                'Content-Type': 'application/x-protobuf',
+                // ...(headers ? { 'X-Kubiks-Key': headers.split('=')[1] || '' } : {}),
+                'X-Kubiks-Key': 'UY1GhCfqfbuletNL8h2vtHihVvgBVcZyT6YhTVMjjws=',
             },
-            body: JSON.stringify(otlpLogs),
+            body: buffer,
         });
     } catch (error) {
         // Silently fail to avoid disrupting application
@@ -189,6 +246,8 @@ function flushLogsSync(): void {
         const headers = process.env.OTEL_EXPORTER_OTLP_HEADERS;
 
         if (endpoint && logs.length > 0) {
+            const LogsData = createProtobufSchema();
+
             const otlpLogs = {
                 resourceLogs: [
                     {
@@ -219,8 +278,12 @@ function flushLogsSync(): void {
                 ]
             };
 
+            // Encode to protobuf
+            const buffer = LogsData.encode(otlpLogs).finish();
+
             // Note: In a real-world scenario, you might want to use a synchronous HTTP library
             // or write to a local file as fallback for process exit scenarios
+            // For now, we'll prepare the protobuf buffer but can't send it synchronously
         }
     } catch (error) {
         // Silently fail on exit
