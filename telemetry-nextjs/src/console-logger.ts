@@ -1,15 +1,72 @@
-import * as protobuf from 'protobufjs';
+import {
+    LoggerProvider,
+    BatchLogRecordProcessor,
+} from "@opentelemetry/sdk-logs";
 
-interface LogRecord {
-    timestamp: number;
-    severityText: string;
-    severityNumber: number;
-    body: string;
-    attributes: Record<string, any>;
+// Simple HTTP Log Exporter
+class SimpleOTLPLogExporter {
+    private url: string;
+    private headers: Record<string, string>;
+
+    constructor(config: { url: string; headers?: Record<string, string> }) {
+        this.url = config.url;
+        this.headers = config.headers || {};
+    }
+
+    async export(logs: any[]): Promise<void> {
+        if (logs.length === 0) return;
+
+        const payload = {
+            resourceLogs: [
+                {
+                    resource: {
+                        attributes: [
+                            {
+                                key: 'service.name',
+                                value: { stringValue: 'nextjs-app' }
+                            }
+                        ]
+                    },
+                    scopeLogs: [
+                        {
+                            scope: { name: 'console-logger' },
+                            logRecords: logs.map(log => ({
+                                timeUnixNano: (Date.now() * 1_000_000).toString(),
+                                severityText: log.severityText,
+                                body: { stringValue: log.body },
+                                attributes: Object.entries(log.attributes || {}).map(([key, value]) => ({
+                                    key,
+                                    value: { stringValue: String(value) }
+                                }))
+                            }))
+                        }
+                    ]
+                }
+            ]
+        };
+
+        try {
+            await fetch(this.url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...this.headers,
+                },
+                body: JSON.stringify(payload),
+            });
+        } catch (error) {
+            // Silently handle errors
+        }
+    }
+
+    async shutdown(): Promise<void> {
+        // No-op for simple exporter
+    }
+
+    async forceFlush(): Promise<void> {
+        // No-op for simple exporter
+    }
 }
-
-// Store logs for automatic flush
-let logBuffer: LogRecord[] = [];
 
 // Store original console methods
 const originalConsole = {
@@ -28,68 +85,21 @@ const consoleToSeverity = {
     debug: 'DEBUG',
 } as const;
 
-// Map severity text to OTEL severity numbers
-function getSeverityNumber(severity: string): number {
-    switch (severity) {
-        case 'ERROR': return 17;
-        case 'WARN': return 13;
-        case 'INFO': return 9;
-        case 'DEBUG': return 5;
-        default: return 9;
-    }
-}
+// Initialize OpenTelemetry Logger
+const exporter = new SimpleOTLPLogExporter({
+    url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ? `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/logs` : "https://otlp.kubiks.ai/v1/logs",
+    headers: {
+        "X-Kubiks-Key": "UY1GhCfqfbuletNL8h2vtHihVvgBVcZyT6YhTVMjjws=",
+    },
+});
 
-// Create protobuf schema for OpenTelemetry logs
-function createProtobufSchema(): protobuf.Type {
-    const root = new protobuf.Root();
+const provider = new LoggerProvider();
+const processor = new BatchLogRecordProcessor(exporter as any);
+(provider as any).addLogRecordProcessor(processor);
 
-    // Define the protobuf schema
-    const AnyValue = new protobuf.Type('AnyValue').add(
-        new protobuf.Field('stringValue', 1, 'string', 'optional')
-    );
-
-    const KeyValue = new protobuf.Type('KeyValue')
-        .add(new protobuf.Field('key', 1, 'string'))
-        .add(new protobuf.Field('value', 2, 'AnyValue'));
-
-    const LogRecord = new protobuf.Type('LogRecord')
-        .add(new protobuf.Field('timeUnixNano', 1, 'uint64'))
-        .add(new protobuf.Field('severityText', 2, 'string'))
-        .add(new protobuf.Field('severityNumber', 3, 'int32'))
-        .add(new protobuf.Field('body', 4, 'AnyValue'))
-        .add(new protobuf.Field('attributes', 5, 'KeyValue', 'repeated'));
-
-    const InstrumentationScope = new protobuf.Type('InstrumentationScope')
-        .add(new protobuf.Field('name', 1, 'string'));
-
-    const ScopeLogs = new protobuf.Type('ScopeLogs')
-        .add(new protobuf.Field('scope', 1, 'InstrumentationScope'))
-        .add(new protobuf.Field('logRecords', 2, 'LogRecord', 'repeated'));
-
-    const Resource = new protobuf.Type('Resource')
-        .add(new protobuf.Field('attributes', 1, 'KeyValue', 'repeated'));
-
-    const ResourceLogs = new protobuf.Type('ResourceLogs')
-        .add(new protobuf.Field('resource', 1, 'Resource'))
-        .add(new protobuf.Field('scopeLogs', 2, 'ScopeLogs', 'repeated'));
-
-    const LogsData = new protobuf.Type('LogsData')
-        .add(new protobuf.Field('resourceLogs', 1, 'ResourceLogs', 'repeated'));
-
-    root.add(AnyValue);
-    root.add(KeyValue);
-    root.add(LogRecord);
-    root.add(InstrumentationScope);
-    root.add(ScopeLogs);
-    root.add(Resource);
-    root.add(ResourceLogs);
-    root.add(LogsData);
-
-    return LogsData;
-}
+const logger = provider.getLogger("nextjs-app");
 
 let isPatched = false;
-let flushInterval: NodeJS.Timeout | null = null;
 
 export function patchConsole(): void {
     // Prevent double patching
@@ -97,41 +107,28 @@ export function patchConsole(): void {
 
     Object.entries(originalConsole).forEach(([method, originalFn]) => {
         console[method as keyof typeof originalConsole] = (...args: any[]) => {
-            // Call original console method
+            // Call original console method first
             originalFn.apply(console, args);
 
-            // Create OTEL log record
-            const logRecord: LogRecord = {
-                timestamp: Date.now() * 1_000_000, // Convert to nanoseconds
+            // Create log message
+            const message = args
+                .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
+                .join(" ");
+
+            // Send to OpenTelemetry
+            logger.emit({
+                body: message,
                 severityText: consoleToSeverity[method as keyof typeof consoleToSeverity],
-                severityNumber: getSeverityNumber(consoleToSeverity[method as keyof typeof consoleToSeverity]),
-                body: args.map(arg =>
-                    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-                ).join(' '),
                 attributes: {
+                    source: "console",
                     'log.type': method,
                     'service.name': 'nextjs-app',
-                    'source': 'console',
                 },
-            };
-
-            // Add to buffer for automatic flushing
-            logBuffer.push(logRecord);
+            });
         };
     });
 
     isPatched = true;
-
-    // Set up automatic periodic flushing (every 5 seconds)
-    if (!flushInterval) {
-        flushInterval = setInterval(() => {
-            if (logBuffer.length > 0) {
-                flushLogs().catch(() => {
-                    // Silently handle flush errors
-                });
-            }
-        }, 5000);
-    }
 
     // Set up process exit handler to flush remaining logs (Node.js runtime only)
     // Skip in Edge Runtime where process.on is not available
@@ -139,11 +136,8 @@ export function patchConsole(): void {
         if (typeof process !== 'undefined' &&
             typeof process.on === 'function' &&
             typeof process.env !== 'undefined') {
-            const exitHandler = () => {
-                if (logBuffer.length > 0) {
-                    // Synchronous flush on exit
-                    flushLogsSync();
-                }
+            const exitHandler = async () => {
+                await flushLogs();
             };
 
             process.on('exit', exitHandler);
@@ -157,135 +151,14 @@ export function patchConsole(): void {
     }
 }
 
-// Send logs to OTEL endpoint in protobuf format
-async function sendLogsToOTEL(logs: LogRecord[]): Promise<void> {
-    if (logs.length === 0) return;
-
-    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-    const headers = process.env.OTEL_EXPORTER_OTLP_HEADERS;
-
-    if (!endpoint) {
-        return;
-    }
-
-    try {
-        const LogsData = createProtobufSchema();
-
-        const otlpLogs = {
-            resourceLogs: [
-                {
-                    resource: {
-                        attributes: [
-                            {
-                                key: 'service.name',
-                                value: { stringValue: 'nextjs-app' }
-                            }
-                        ]
-                    },
-                    scopeLogs: [
-                        {
-                            scope: { name: 'console-logger' },
-                            logRecords: logs.map(log => ({
-                                timeUnixNano: log.timestamp.toString(),
-                                severityText: log.severityText,
-                                severityNumber: log.severityNumber,
-                                body: { stringValue: log.body },
-                                attributes: Object.entries(log.attributes).map(([key, value]) => ({
-                                    key,
-                                    value: { stringValue: String(value) }
-                                }))
-                            }))
-                        }
-                    ]
-                }
-            ]
-        };
-
-        // Encode to protobuf
-        const buffer = LogsData.encode(otlpLogs).finish();
-
-        const response = await fetch(`${endpoint}/v1/logs`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-protobuf',
-                // ...(headers ? { 'X-Kubiks-Key': headers.split('=')[1] || '' } : {}),
-                'X-Kubiks-Key': 'UY1GhCfqfbuletNL8h2vtHihVvgBVcZyT6YhTVMjjws=',
-            },
-            body: buffer,
-        });
-    } catch (error) {
-        // Silently fail to avoid disrupting application
-    }
-}
-
-// Flush logs to OTEL (async version for middleware)
+// Flush logs to OTEL
 export async function flushLogs(): Promise<void> {
-    if (logBuffer.length === 0) {
-        return;
+    try {
+        await provider.forceFlush();
+    } catch (error) {
+        // Silently handle flush errors
     }
-
-    const logsToSend = [...logBuffer];
-    logBuffer = [];
-
-    await sendLogsToOTEL(logsToSend);
 }
 
-// Synchronous flush for process exit (best effort)
-function flushLogsSync(): void {
-    if (logBuffer.length === 0) {
-        return;
-    }
-
-    const logs = [...logBuffer];
-    logBuffer = [];
-
-    // For process exit, we attempt a synchronous approach
-    // This is a best-effort attempt and may not always succeed
-    try {
-        const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-        const headers = process.env.OTEL_EXPORTER_OTLP_HEADERS;
-
-        if (endpoint && logs.length > 0) {
-            const LogsData = createProtobufSchema();
-
-            const otlpLogs = {
-                resourceLogs: [
-                    {
-                        resource: {
-                            attributes: [
-                                {
-                                    key: 'service.name',
-                                    value: { stringValue: 'nextjs-app' }
-                                }
-                            ]
-                        },
-                        scopeLogs: [
-                            {
-                                scope: { name: 'console-logger' },
-                                logRecords: logs.map(log => ({
-                                    timeUnixNano: log.timestamp.toString(),
-                                    severityText: log.severityText,
-                                    severityNumber: log.severityNumber,
-                                    body: { stringValue: log.body },
-                                    attributes: Object.entries(log.attributes).map(([key, value]) => ({
-                                        key,
-                                        value: { stringValue: String(value) }
-                                    }))
-                                }))
-                            }
-                        ]
-                    }
-                ]
-            };
-
-            // Encode to protobuf
-            const buffer = LogsData.encode(otlpLogs).finish();
-
-            // Note: In a real-world scenario, you might want to use a synchronous HTTP library
-            // or write to a local file as fallback for process exit scenarios
-            // For now, we'll prepare the protobuf buffer but can't send it synchronously
-        }
-    } catch (error) {
-        // Silently fail on exit
-    }
-} 
+// Export provider for external use
+export { provider as logProvider }; 

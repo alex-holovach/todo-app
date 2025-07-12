@@ -20,7 +20,7 @@
     "author": "",
     "license": "MIT",
     "dependencies": {
-        "protobufjs": "^7.2.6"
+        "@opentelemetry/sdk-logs": "^0.56.0"
     },
     "devDependencies": {
         "typescript": "^5.0.0",
