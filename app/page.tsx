@@ -9,5 +9,7 @@ export default async function Page() {
     hello: 'world',
   })
 
+  const response = await fetch('https://kubiks.ai')
+
   return <TodoApp />
 }
