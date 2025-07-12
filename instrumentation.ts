@@ -1,4 +1,4 @@
-import { registerTelemetry } from 'telemetry-nextjs';
+import { registerTelemetry } from '@kubiks/otel-nextjs';
 
 export function register() {
     registerTelemetry({
