@@ -2,6 +2,17 @@ import {
     LoggerProvider,
     BatchLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
+import {
+    trace,
+    SpanStatusCode,
+    context,
+    SpanKind,
+} from "@opentelemetry/api";
+import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
+
+// Initialize context manager
+const contextManager = new AsyncHooksContextManager();
+context.setGlobalContextManager(contextManager);
 
 // Simple HTTP Log Exporter
 class SimpleOTLPLogExporter {
@@ -30,15 +41,23 @@ class SimpleOTLPLogExporter {
                     scopeLogs: [
                         {
                             scope: { name: 'console-logger' },
-                            logRecords: logs.map(log => ({
-                                timeUnixNano: (Date.now() * 1_000_000).toString(),
-                                severityText: log.severityText,
-                                body: { stringValue: log.body },
-                                attributes: Object.entries(log.attributes || {}).map(([key, value]) => ({
-                                    key,
-                                    value: { stringValue: String(value) }
-                                }))
-                            }))
+                            logRecords: logs.map(log => {
+                                // Extract trace ID and span ID from attributes
+                                const traceId = log.attributes?.['trace.id'];
+                                const spanId = log.attributes?.['span.id'];
+
+                                return {
+                                    timeUnixNano: (Date.now() * 1_000_000).toString(),
+                                    severityText: log.severityText,
+                                    body: { stringValue: log.body },
+                                    attributes: Object.entries(log.attributes || {}).map(([key, value]) => ({
+                                        key,
+                                        value: { stringValue: String(value) }
+                                    })),
+                                    ...(traceId && { traceId }),
+                                    ...(spanId && { spanId }),
+                                };
+                            })
                         }
                     ]
                 }
@@ -99,7 +118,40 @@ const processor = new BatchLogRecordProcessor(exporter as any);
 
 const logger = provider.getLogger("nextjs-app");
 
+// Initialize tracer
+const tracer = trace.getTracer("nextjs-app", "1.0.0");
+
 let isPatched = false;
+
+function getOrCreateTraceContext(): { traceId: string; spanId: string } {
+    const activeSpan = trace.getActiveSpan();
+
+    if (activeSpan) {
+        const spanContext = activeSpan.spanContext();
+        return {
+            traceId: spanContext.traceId,
+            spanId: spanContext.spanId,
+        };
+    }
+
+    // No active span, create a new one
+    const span = tracer.startSpan("console-log", {
+        kind: SpanKind.INTERNAL,
+    });
+
+    const spanContext = span.spanContext();
+
+    // End the span after a short delay to avoid keeping it open indefinitely
+    setTimeout(() => {
+        span.setStatus({ code: SpanStatusCode.OK });
+        span.end();
+    }, 100);
+
+    return {
+        traceId: spanContext.traceId,
+        spanId: spanContext.spanId,
+    };
+}
 
 export function patchConsole(): void {
     // Prevent double patching
@@ -109,6 +161,9 @@ export function patchConsole(): void {
         console[method as keyof typeof originalConsole] = (...args: any[]) => {
             // Call original console method first
             originalFn.apply(console, args);
+
+            // Get or create trace context
+            const { traceId, spanId } = getOrCreateTraceContext();
 
             // Create log message
             const message = args
@@ -123,6 +178,8 @@ export function patchConsole(): void {
                     source: "console",
                     'log.type': method,
                     'service.name': 'nextjs-app',
+                    'trace.id': traceId,
+                    'span.id': spanId,
                 },
             });
         };
@@ -160,5 +217,69 @@ export async function flushLogs(): Promise<void> {
     }
 }
 
-// Export provider for external use
-export { provider as logProvider }; 
+// Export provider and tracer for external use
+export { provider as logProvider, tracer };
+
+// Helper function to manually start a trace
+export function startTrace(name: string = "manual-trace"): { traceId: string; spanId: string; endTrace: () => void } {
+    const span = tracer.startSpan(name, {
+        kind: SpanKind.INTERNAL,
+    });
+
+    const spanContext = span.spanContext();
+
+    return {
+        traceId: spanContext.traceId,
+        spanId: spanContext.spanId,
+        endTrace: () => {
+            span.setStatus({ code: SpanStatusCode.OK });
+            span.end();
+        }
+    };
+}
+
+// Helper function to run code within a trace context
+export function runInTrace<T>(name: string, fn: () => T): T {
+    const span = tracer.startSpan(name, {
+        kind: SpanKind.INTERNAL,
+    });
+
+    return context.with(trace.setSpan(context.active(), span), () => {
+        try {
+            const result = fn();
+            span.setStatus({ code: SpanStatusCode.OK });
+            return result;
+        } catch (error) {
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        } finally {
+            span.end();
+        }
+    });
+}
+
+// Helper function to run async code within a trace context
+export async function runInTraceAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const span = tracer.startSpan(name, {
+        kind: SpanKind.INTERNAL,
+    });
+
+    return await context.with(trace.setSpan(context.active(), span), async () => {
+        try {
+            const result = await fn();
+            span.setStatus({ code: SpanStatusCode.OK });
+            return result;
+        } catch (error) {
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        } finally {
+            span.end();
+        }
+    });
+} 

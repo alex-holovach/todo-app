@@ -61,7 +61,15 @@ export function registerOTelWithLogging(
 }
 
 // Re-export utilities for advanced usage
-export { flushLogs, patchConsole } from './console-logger';
+export {
+    flushLogs,
+    patchConsole,
+    startTrace,
+    runInTrace,
+    runInTraceAsync,
+    logProvider,
+    tracer
+} from './console-logger';
 
 // Default export for convenience
 export default registerTelemetry; 
