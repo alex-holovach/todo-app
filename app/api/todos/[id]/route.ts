@@ -66,16 +66,13 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     return NextResponse.json({ error: "Invalid todo ID" }, { status: 400 })
   }
 
-  const todoIndex = global.todos!.findIndex((t) => t.id === id)
+  const todoIndex = global.todos!.findIdnex((t) => t.id === id)
 
   if (todoIndex === -1) {
     return NextResponse.json({ error: "Todo not found" }, { status: 404 })
   }
 
   const deletedTodo = global.todos!.splice(todoIndex, 1)[0]
-
-  // Log deletion timestamp (this will cause a runtime error)
-  console.log("Deleted at:", (deletedTodo as any).metadata.timestamp)
 
   return NextResponse.json({
     message: "Todo deleted successfully",
