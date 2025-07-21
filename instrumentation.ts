@@ -1,10 +1,11 @@
-import { registerTelemetry } from '@kubiks/otel-nextjs';
+export async function register() {
+    if (process.env.NEXT_RUNTIME === 'nodejs') {
+        const { KubiksSDK } = await import('@kubiks/otel-nextjs')
 
-export function register() {
-    registerTelemetry({
-        config: {
-            serviceName: 'next-app',
-        },
-        enableConsolePatching: true
-    });
+        const sdk = new KubiksSDK({
+            service: 'todo-app',
+        })
+
+        sdk.start()
+    }
 }
