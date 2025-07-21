@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
-    "@kubiks/otel-nextjs": "^1.0.22",
+    "@kubiks/otel-nextjs": "^1.0.23",
     "@opentelemetry/api-logs": "^0.52.1",
     "@opentelemetry/exporter-logs-otlp-http": "^0.52.1",
     "@opentelemetry/exporter-trace-otlp-http": "^0.52.1",
