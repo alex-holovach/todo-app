@@ -23,7 +23,7 @@ if (!global.todos) {
 // GET /api/todos/[id] - Get a specific todo
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   console.log('Log from GET')
-  const id = Number.parseInt(params.id)
+  const id = await Number.parseInt(params.id)
 
   if (isNaN(id)) {
     return NextResponse.json({ error: "Invalid todo ID" }, { status: 400 })
@@ -40,13 +40,14 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 // PATCH /api/todos/[id] - Toggle todo completion
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number.parseInt(params.id)
+  const { id } = await params
+  const idNum = Number.parseInt(id)
 
-  if (isNaN(id)) {
+  if (isNaN(idNum)) {
     return NextResponse.json({ error: "Invalid todo ID" }, { status: 400 })
   }
 
-  const todoIndex = global.todos!.findIndex((t) => t.id === id)
+  const todoIndex = global.todos!.findIndex((t) => t.id === idNum)
 
   if (todoIndex === -1) {
     return NextResponse.json({ error: "Todo not found" }, { status: 404 })
@@ -60,13 +61,14 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 
 // DELETE /api/todos/[id] - Delete a specific todo
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
-  const id = Number.parseInt(params.id)
+  const { id } = await params
+  const idNum = Number.parseInt(id)
 
-  if (isNaN(id)) {
+  if (isNaN(idNum)) {
     return NextResponse.json({ error: "Invalid todo ID" }, { status: 400 })
   }
 
-  const todoIndex = global.todos!.findIdnex((t) => t.id === id)
+  const todoIndex = global.todos!.findIdnex((t) => t.id === idNum)
 
   if (todoIndex === -1) {
     return NextResponse.json({ error: "Todo not found" }, { status: 404 })

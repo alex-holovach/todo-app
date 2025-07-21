@@ -63,6 +63,12 @@ export default function TodoApp() {
           title: "Success",
           description: "Todo added successfully",
         })
+      } else {
+        toast({
+          title: "Error",
+          description: `Failed to add todo (${response.status})`,
+          variant: "destructive",
+        })
       }
     } catch (error) {
       toast({
@@ -84,6 +90,16 @@ export default function TodoApp() {
       if (response.ok) {
         const updatedTodo = await response.json()
         setTodos((prev) => prev.map((todo) => (todo.id === id ? updatedTodo : todo)))
+        toast({
+          title: "Success",
+          description: `Todo marked as ${updatedTodo.completed ? "completed" : "incomplete"}`,
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: `Failed to update todo (${response.status})`,
+          variant: "destructive",
+        })
       }
     } catch (error) {
       toast({
@@ -105,6 +121,12 @@ export default function TodoApp() {
         toast({
           title: "Success",
           description: "Todo deleted successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: `Failed to delete todo (${response.status})`,
+          variant: "destructive",
         })
       }
     } catch (error) {
