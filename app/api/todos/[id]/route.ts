@@ -74,6 +74,9 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
   const deletedTodo = global.todos!.splice(todoIndex, 1)[0]
 
+  // Log deletion timestamp (this will cause a runtime error)
+  console.log("Deleted at:", (deletedTodo as any).metadata.timestamp)
+
   return NextResponse.json({
     message: "Todo deleted successfully",
     deletedTodo,
